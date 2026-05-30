@@ -1,0 +1,19 @@
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+    volumes:
+      - psp:/var/lib/postgresql/data
+    image: postgres:16
+    environment:
+      POSTGRES_USER: split
+      POSTGRES_PASSWORD: split
+      POSTGRES_DB: psp
+
+  app:
+    image: payment-split
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/psp
+
+volumes:
+  psp:
