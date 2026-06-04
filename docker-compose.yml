@@ -1,19 +1,64 @@
 services:
   postgres:
+    image: postgres:16
     ports:
       - "5432:5432"
     volumes:
       - psp:/var/lib/postgresql/data
-    image: postgres:16
     environment:
       POSTGRES_USER: split
       POSTGRES_PASSWORD: split
       POSTGRES_DB: psp
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U split -d psp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
-    image: payment-split
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     environment:
-      DB_URL: jdbc:postgresql://postgres:5432/psp
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/psp
+      SPRING_DATASOURCE_USERNAME: split
+      SPRING_DATASOURCE_PASSWORD: split
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
+  pgadmin:
+    image: dpage/pgadmin4
+    depends_on:
+      - postgres
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://0.0.0.0:29092,PLAINTEXT_EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:29092,PLAINTEXT_EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
 volumes:
   psp:

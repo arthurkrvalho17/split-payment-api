@@ -32,7 +32,8 @@ public class TransactionEntity {
     @Enumerated(EnumType.STRING)
     private TransactionStatus status;
 
-    @OneToMany (mappedBy = "transaction")
+    //Forçar o carregamento das splits
+    @OneToMany (mappedBy = "transaction", fetch = FetchType.EAGER)
     private List<SplitEntryEntity> splits;
 
     private OffsetDateTime createdAt;

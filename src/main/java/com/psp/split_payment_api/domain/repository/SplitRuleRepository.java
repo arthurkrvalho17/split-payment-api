@@ -12,5 +12,7 @@ public interface SplitRuleRepository {
 
     Optional<SplitRule> findById(UUID id);
 
+    List<SplitRule> findByMerchant(UUID merchantId);
+
     List<SplitRule> findAll();
 }

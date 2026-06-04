@@ -9,7 +9,6 @@ public class MerchantMapper {
 
     public MerchantEntity toEntity(Merchant merchant){
         return MerchantEntity.builder()
-                .id(merchant.getId())
                 .name(merchant.getName())
                 .document(merchant.getDocument())
                 .createdAt(merchant.getCreatedAt())

@@ -5,23 +5,20 @@ import lombok.Builder;
 import lombok.Getter;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.UUID;
 
 @Getter
-@Builder(toBuilder = true)
+@Builder
 @AllArgsConstructor
-public class Transaction {
+public class PaymentEvent {
 
     private UUID id;
 
-    private Merchant merchant;
+    private Transaction transaction;
 
-    private Long amountCents;
+    private EventType eventType;
 
-    private TransactionStatus status;
-
-    private List<SplitEntry> splits;
+    private String payload;
 
     private OffsetDateTime createdAt;
 }
