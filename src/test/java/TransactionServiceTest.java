@@ -1,7 +1,6 @@
 import com.psp.split_payment_api.application.service.TransactionService;
 import com.psp.split_payment_api.domain.model.*;
 import com.psp.split_payment_api.domain.repository.*;
-import com.psp.split_payment_api.infra.dto.CreateSplitRuleRequest;
 import com.psp.split_payment_api.infra.dto.CreateTransactionRequest;
 import com.psp.split_payment_api.infra.messaging.PaymentEventProducer;
 import jakarta.persistence.EntityManager;
@@ -13,7 +12,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import javax.swing.*;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -45,7 +43,6 @@ public class TransactionServiceTest {
     @InjectMocks
     private TransactionService transactionService;
 
-    @BeforeEach
     void setUp() throws Exception {
         var field = TransactionService.class.getDeclaredField("entityManager");
         field.setAccessible(true);
@@ -113,7 +110,7 @@ public class TransactionServiceTest {
     }
 
     @Test //Merchant ñ encontrado
-    void shouldThrowExceptionWhenMerchantNotFound() {
+    void shouldCompleteTransactionWithValidMerchant() {
         var request = new CreateTransactionRequest(UUID.randomUUID(), UUID.randomUUID(), 10000L);
 
         when(merchantRepository.findById(any())).thenReturn(Optional.empty());

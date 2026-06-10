@@ -24,8 +24,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TransactionService {
 
-    @PersistenceContext
-    private EntityManager entityManager;
+    private final EntityManager entityManager;
     private final PaymentEventRepository paymentEventRepository;
     private final MerchantRepository merchantRepository;
     private final SplitRuleRepository splitRuleRepository;
