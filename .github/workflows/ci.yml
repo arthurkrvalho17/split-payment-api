@@ -6,11 +6,10 @@ on:   #Triggers: "on pipeline run"
   pull_request:
     branches: [main]
 
-  jobs:
-    build-and-test:
-      runs-on: ubuntu-latest
-
-      steps:                          #Sequência de passos que o job vai seguir
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:                          #Sequência de passos que o job vai seguir
           - uses: actions/checkou t@v3    #Clona o repository na VM
           - name: Set up JDK 17           #Instala o Java 17
             uses: actions/setup-java@v3
