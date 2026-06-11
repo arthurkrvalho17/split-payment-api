@@ -50,11 +50,4 @@ public class TransactionController {
                 )
         );
     }
-
-    @GetMapping("{id}")
-    public ResponseEntity<String> detalhateTransaction(@PathVariable UUID id) {
-
-        return ResponseEntity.status(HttpStatus.OK).body(service.detalhateTransaction(id));
-    }
-
 }
