@@ -1,6 +1,7 @@
 package com.psp.split_payment_api.infra.persistence;
 
 import com.psp.split_payment_api.domain.model.EventType;
+import com.psp.split_payment_api.domain.model.PaymentEventStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -36,6 +37,10 @@ public class PaymentEventEntity {
     @Column(columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     private String payload;
+
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private PaymentEventStatus status = PaymentEventStatus.PENDING;
 
     private OffsetDateTime createdAt;
 }
