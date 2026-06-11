@@ -1,6 +1,7 @@
 package com.psp.split_payment_api.infra.mapper;
 
 import com.psp.split_payment_api.domain.model.PaymentEvent;
+import com.psp.split_payment_api.domain.model.PaymentEventStatus;
 import com.psp.split_payment_api.domain.model.Transaction;
 import com.psp.split_payment_api.infra.persistence.PaymentEventEntity;
 import com.psp.split_payment_api.infra.persistence.TransactionEntity;
@@ -16,6 +17,7 @@ public class PaymentEventMapper {
                         .build())
                 .eventType(paymentEvent.getEventType())
                 .payload(paymentEvent.getPayload())
+                .status(paymentEvent.getStatus() != null ? paymentEvent.getStatus() : PaymentEventStatus.PENDING)
                 .createdAt(paymentEvent.getCreatedAt())
                 .build();
     }
@@ -28,6 +30,7 @@ public class PaymentEventMapper {
                         .build())
                 .eventType(paymentEventEntity.getEventType())
                 .payload(paymentEventEntity.getPayload())
+                .status(paymentEventEntity.getStatus())
                 .createdAt(paymentEventEntity.getCreatedAt())
                 .build();
     }

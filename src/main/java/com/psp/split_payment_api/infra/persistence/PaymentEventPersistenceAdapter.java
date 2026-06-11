@@ -1,6 +1,7 @@
 package com.psp.split_payment_api.infra.persistence;
 
 import com.psp.split_payment_api.domain.model.PaymentEvent;
+import com.psp.split_payment_api.domain.model.PaymentEventStatus;
 import com.psp.split_payment_api.domain.repository.PaymentEventRepository;
 import com.psp.split_payment_api.infra.mapper.PaymentEventMapper;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,14 @@ public class PaymentEventPersistenceAdapter implements PaymentEventRepository {
     @Override
     public List<PaymentEvent> findByTransactionId(UUID transactionId) {
         return jpaRepository.findByTransaction_Id(transactionId)
+                .stream()
+                .map(paymentEventMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<PaymentEvent> findByStatus(PaymentEventStatus status) {
+        return jpaRepository.findByStatus(status)
                 .stream()
                 .map(paymentEventMapper::toDomain)
                 .toList();

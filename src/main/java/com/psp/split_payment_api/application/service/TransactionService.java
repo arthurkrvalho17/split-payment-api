@@ -2,36 +2,30 @@ package com.psp.split_payment_api.application.service;
 
 import com.psp.split_payment_api.domain.exception.MerchantNotFoundException;
 import com.psp.split_payment_api.domain.exception.RecipientNotFoundException;
-import com.psp.split_payment_api.domain.exception.TransactionNotFoundException;
 import com.psp.split_payment_api.domain.model.*;
 import com.psp.split_payment_api.domain.repository.*;
 import com.psp.split_payment_api.infra.dto.CreateTransactionRequest;
-import com.psp.split_payment_api.infra.messaging.PaymentEventProducer;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.text.NumberFormat;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class TransactionService {
 
-    private final EntityManager entityManager;
-    private final PaymentEventRepository paymentEventRepository;
+    @PersistenceContext
+    private EntityManager entityManager;
     private final MerchantRepository merchantRepository;
     private final SplitRuleRepository splitRuleRepository;
     private final SplitEntryRepository splitEntryRepository;
     private final TransactionRepository transactionRepository;
     private final RecipientRepository recipientRepository;
-    private final PaymentEventProducer paymentEventProducer;
+    private final PaymentEventRepository paymentEventRepository;
 
     @Transactional
     public Transaction save(CreateTransactionRequest request) {
@@ -44,20 +38,17 @@ public class TransactionService {
             .splits(List.of())
             .createdAt(OffsetDateTime.now()).build());
 
-       String payload = String.format(
-       "{\"transactionId\": \"%s\", \"amountCents\": %d, \"merchantId\": \"%s\"}",
-
-               transactionPending.getId(),
-               transactionPending.getAmountCents(),
-               transactionPending.getMerchant().getId()
-       );
-
-       paymentEventProducer.publish(paymentEventRepository.save(PaymentEvent.builder()
+       paymentEventRepository.save(PaymentEvent.builder()
                .eventType(EventType.TRANSACTION_CREATED)
                .transaction(transactionPending)
-               .payload(payload)
+               .payload(String.format(
+                       "{\"eventType\": \"TRANSACTION_CREATED\", \"transactionId\": \"%s\", \"amountCents\": %d, \"merchantId\": \"%s\"}",
+                       transactionPending.getId(),
+                       transactionPending.getAmountCents(),
+                       transactionPending.getMerchant().getId()))
+               .status(PaymentEventStatus.PENDING)
                .createdAt(OffsetDateTime.now())
-               .build()));
+               .build());
 
        List<SplitRule> splitRules = splitRuleRepository.findByMerchant(request.merchantId());
 
@@ -74,12 +65,18 @@ public class TransactionService {
                             .createdAt(OffsetDateTime.now())
                             .build());
 
-                    paymentEventProducer.publish(paymentEventRepository.save(PaymentEvent.builder()
+                    paymentEventRepository.save(PaymentEvent.builder()
                             .eventType(EventType.SPLIT_EXECUTED)
-                            .payload(payload)
                             .transaction(transactionPending)
+                            .payload(String.format(
+                                    "{\"eventType\": \"SPLIT_EXECUTED\", \"transactionId\": \"%s\", \"recipientId\": \"%s\", \"amountCents\": %d, \"percent\": %d}",
+                                    transactionPending.getId(),
+                                    splitRule.getRecipient().getId(),
+                                    amount,
+                                    splitRule.getPercent()))
+                            .status(PaymentEventStatus.PENDING)
                             .createdAt(OffsetDateTime.now())
-                            .build()));
+                            .build());
 
                     return amount;
                 })
@@ -108,50 +105,23 @@ public class TransactionService {
                 .status(TransactionStatus.COMPLETED)
                 .build());
 
-        paymentEventProducer.publish(paymentEventRepository.save(PaymentEvent.builder()
-                .id(UUID.randomUUID())
+        paymentEventRepository.save(PaymentEvent.builder()
                 .eventType(EventType.TRANSACTION_COMPLETED)
-                .payload(payload)
                 .transaction(transactionCompleted)
+                .payload(String.format(
+                        "{\"eventType\": \"TRANSACTION_COMPLETED\", \"transactionId\": \"%s\", \"amountCents\": %d}",
+                        transactionCompleted.getId(),
+                        transactionCompleted.getAmountCents()))
+                .status(PaymentEventStatus.PENDING)
                 .createdAt(OffsetDateTime.now())
-                .build()));
-
+                .build());
 
         //Forçar carregamento de objeto atualizado para buscar as splits
         entityManager.flush();
         entityManager.clear();
 
         //Sem tratamento pois não é um erro possível
-        return transactionRepository.findById(transactionPending.getId())
+        return transactionRepository.findById(transactionCompleted.getId())
                 .orElseThrow(RuntimeException::new);
-    }
-
-    public String detalhateTransaction(UUID transactionId) {
-
-        var transaction = transactionRepository.findById(transactionId)
-                .orElseThrow(() -> new TransactionNotFoundException(transactionId));
-
-        NumberFormat formatter = NumberFormat.getCurrencyInstance(new Locale("pt", "BR"));
-
-        BigDecimal valueFormated = BigDecimal.valueOf(transaction.getAmountCents()).divide(BigDecimal.valueOf(100));
-        StringBuilder splits = new StringBuilder();
-        transaction.getSplits().forEach(s -> {
-            splits.append(String.format("%-12s Recipient: %-36s | %3d%% | %s\n",
-                    "[" + s.getType() + "]",
-                    s.getRecipient().getName(),
-                    s.getPercentApplied(),
-                    formatter.format(BigDecimal.valueOf(s.getAmountCents()).divide(BigDecimal.valueOf(100))))
-            );
-        });
-
-
-        return "=== EXTRATO DE TRANSAÇÃO ===\n" +
-                "ID: " + transaction.getId() + "\n" +
-                "Data: " + transaction.getCreatedAt() + "\n" +
-                "Status: " + transaction.getStatus() + "\n" +
-                "Valor Total: R$" + valueFormated + "\n" +
-                "--- SPLITS ---\n" +
-                splits +
-                "============================";
     }
 }

@@ -1,10 +1,11 @@
 # Split Payment API
 
-API de processamento de pagamentos com divisão automática entre múltiplos recebedores. Construída com arquitetura hexagonal, eventos assíncronos via Kafka e persistência PostgreSQL.
+API de processamento de pagamentos com divisão automática entre múltiplos recebedores. Construída com **arquitetura hexagonal**, **Outbox Pattern**, **mensageria assíncrona via Kafka** e persistência PostgreSQL.
 
 ## Índice
 
 - [Visão Geral](#visão-geral)
+- [Decisões de Arquitetura](#decisões-de-arquitetura)
 - [Tecnologias](#tecnologias)
 - [Arquitetura](#arquitetura)
 - [Estrutura do Projeto](#estrutura-do-projeto)
@@ -26,6 +27,54 @@ A **Split Payment API** é um sistema de PSP (Payment Service Provider) que perm
 - Configurar regras de split (taxa, imposto, comissão, repasse)
 - Processar transações com divisão automática
 - Consultar detalhes de transações e splits
+
+---
+
+## Decisões de Arquitetura
+
+### Outbox Pattern — Consistência entre banco e Kafka
+
+O problema clássico de sistemas event-driven é: **como garantir que o evento seja publicado se o banco commitou, mas o Kafka falhou?** (ou vice-versa).
+
+A solução ingênua publica diretamente no Kafka dentro da transação — mas isso cria uma janela de inconsistência: o Kafka pode receber a mensagem antes do banco commitar, e o consumer tenta processar dados que ainda não existem.
+
+Neste projeto, adotamos o **Outbox Pattern**:
+
+```
+@Transactional
+TransactionService.save()
+  ├── INSERT transaction         ┐
+  ├── INSERT payment_event (PENDING) ┤ mesmo commit atômico
+  └── INSERT split_entries       ┘
+
+OutboxRelayService (@Scheduled a cada 1s)
+  ├── SELECT payment_event WHERE status = PENDING
+  ├── kafkaTemplate.send(...)
+  └── UPDATE payment_event SET status = PUBLISHED (ou FAILED)
+```
+
+**Garantias obtidas:**
+- Nenhum evento é publicado antes do banco commitar
+- Nenhum evento é perdido se o Kafka estiver indisponível (fica `PENDING` até o relay conseguir publicar)
+- Rastreabilidade completa: toda mensagem publicada tem registro no banco com status
+
+---
+
+### Arquitetura Hexagonal (Ports & Adapters)
+
+O domínio não conhece Spring, JPA ou Kafka. As interfaces de repositório ficam no domínio; as implementações (JPA, Kafka) ficam na infraestrutura. Isso permite:
+
+- Trocar PostgreSQL por outro banco sem tocar no domínio
+- Testar a lógica de negócio sem subir infraestrutura
+- Isolar responsabilidades por camada
+
+---
+
+### Kafka + Dead Letter Topic
+
+Eventos inválidos ou que falhem no processamento são encaminhados automaticamente para `payment-events.DLT`, evitando que uma mensagem corrompida bloqueie o consumer indefinidamente. O consumer valida a presença do campo `eventType` antes de processar, com log explícito para facilitar debugging.
+
+---
 
 ---
 
@@ -82,6 +131,7 @@ O projeto segue a **Arquitetura Hexagonal** (Ports & Adapters), com separação 
 - **Repository Pattern** — abstrações de acesso a dados no domínio
 - **Adapter Pattern** — adaptadores de persistência implementam as interfaces do domínio
 - **Mapper Pattern** — conversão centralizada entre entidades JPA e modelos de domínio
+- **Outbox Pattern** — eventos são persistidos atomicamente com a transação e publicados no Kafka por um relay assíncrono
 - **Event-Driven** — eventos publicados em Kafka para auditoria e extensibilidade
 - **Service Layer** — lógica de negócio isolada nos serviços de aplicação
 
@@ -97,7 +147,8 @@ src/main/java/com/psp/split_payment_api/
 │       ├── MerchantService
 │       ├── RecipientService
 │       ├── SplitRuleService
-│       └── TransactionService
+│       ├── TransactionService
+│       └── OutboxRelayService  # Publica eventos pendentes no Kafka
 │
 ├── domain/
 │   ├── exception/             # Exceções de domínio
@@ -115,7 +166,8 @@ src/main/java/com/psp/split_payment_api/
 │   │   ├── PaymentEvent
 │   │   ├── SplitType (enum)
 │   │   ├── TransactionStatus (enum)
-│   │   └── EventType (enum)
+│   │   ├── EventType (enum)
+│   │   └── PaymentEventStatus (enum)  # PENDING | PUBLISHED | FAILED
 │   └── repository/            # Interfaces de repositório
 │
 └── infra/
@@ -312,25 +364,6 @@ Content-Type: application/json
 
 ---
 
-#### Consultar Detalhes da Transação
-
-```http
-GET /transaction/{id}
-```
-
-**Response `200 OK`** (texto formatado):
-```
-Transação: 880e8400-e29b-41d4-a716-446655440003
-Valor Total: R$ 100,00
-Status: COMPLETED
-
-Splits:
-  - Maria Silva | 15% | COMMISSION | R$ 15,00
-  - Loja do João | 85% | TRANSFER  | R$ 85,00
-```
-
----
-
 ### Erros
 
 Todas as respostas de erro seguem o formato:
@@ -365,7 +398,7 @@ POST /transaction
 2. Cria Transaction com status PENDING
       │
       ▼
-3. Publica evento TRANSACTION_CREATED no Kafka
+3. Salva PaymentEvent TRANSACTION_CREATED no banco (status PENDING)
       │
       ▼
 4. Busca SplitRules do Merchant
@@ -374,7 +407,7 @@ POST /transaction
 5. Para cada SplitRule:
    ├── Calcula: amount = round((percent * totalAmount) / 100)
    ├── Cria SplitEntry
-   └── Publica evento SPLIT_EXECUTED no Kafka
+   └── Salva PaymentEvent SPLIT_EXECUTED no banco (status PENDING)
       │
       ▼
 6. Cria SplitEntry para o Merchant (saldo líquido)
@@ -384,11 +417,20 @@ POST /transaction
 7. Atualiza Transaction para status COMPLETED
       │
       ▼
-8. Publica evento TRANSACTION_COMPLETED no Kafka
+8. Salva PaymentEvent TRANSACTION_COMPLETED no banco (status PENDING)
       │
       ▼
-9. Retorna TransactionResponse com todos os splits
+9. Commit da transação
+      │
+      ▼
+10. OutboxRelayService (a cada 1s) publica eventos PENDING no Kafka
+    └── Atualiza status para PUBLISHED ou FAILED
+      │
+      ▼
+11. Retorna TransactionResponse com todos os splits
 ```
+
+> **Outbox Pattern:** os eventos nunca são publicados diretamente no Kafka dentro da transação. Eles são persistidos atomicamente no banco com status `PENDING` e publicados por um processo separado (`OutboxRelayService`), garantindo que nenhum evento seja perdido ou publicado antes do commit.
 
 ---
 
@@ -452,6 +494,7 @@ As tabelas são criadas automaticamente via **Flyway** ao iniciar a aplicação.
 │                         TRANSACTION_COMPLETED|       │
 │                         TRANSACTION_FAILED)          │
 │ payload         JSONB                                │
+│ status          TEXT   (PENDING|PUBLISHED|FAILED)    │
 │ created_at      TSTZ                                 │
 └──────────────────────────────────────────────────────┘
 ```
@@ -460,7 +503,7 @@ As tabelas são criadas automaticamente via **Flyway** ao iniciar a aplicação.
 
 ## Eventos Kafka
 
-Todos os eventos são publicados no tópico **`payment-events`**.
+Todos os eventos são publicados no tópico **`payment-events`** pelo `OutboxRelayService` após o commit da transação.
 
 | Evento | Quando é disparado |
 |---|---|
@@ -469,15 +512,19 @@ Todos os eventos são publicados no tópico **`payment-events`**.
 | `TRANSACTION_COMPLETED` | Quando todos os splits são executados com sucesso |
 | `TRANSACTION_FAILED` | Em caso de falha no processamento |
 
-**Estrutura do evento:**
+**Status do evento (`PaymentEventStatus`):**
+
+| Status | Descrição |
+|---|---|
+| `PENDING` | Salvo no banco, aguardando publicação |
+| `PUBLISHED` | Publicado com sucesso no Kafka |
+| `FAILED` | Falha na publicação — requer atenção manual |
+
+**Estrutura do payload:**
 ```json
-{
-  "id": "uuid-do-evento",
-  "transactionId": "uuid-da-transacao",
-  "eventType": "TRANSACTION_COMPLETED",
-  "payload": "{ ... }",
-  "createdAt": "2024-01-15T10:33:00Z"
-}
+{ "eventType": "TRANSACTION_CREATED", "transactionId": "uuid", "amountCents": 10000, "merchantId": "uuid" }
+{ "eventType": "SPLIT_EXECUTED", "transactionId": "uuid", "recipientId": "uuid", "amountCents": 1500, "percent": 15 }
+{ "eventType": "TRANSACTION_COMPLETED", "transactionId": "uuid", "amountCents": 10000 }
 ```
 
-O consumer padrão (`psp-group`) processa e loga os eventos. O sistema está preparado para extensão com múltiplos consumers para notificações, relatórios e integrações.
+Mensagens inválidas ou que falhem no processamento são encaminhadas para o tópico **`payment-events.DLT`** (Dead Letter Topic) e logadas com `WARN`.

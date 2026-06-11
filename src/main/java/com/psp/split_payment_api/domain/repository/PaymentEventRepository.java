@@ -1,6 +1,7 @@
 package com.psp.split_payment_api.domain.repository;
 
 import com.psp.split_payment_api.domain.model.PaymentEvent;
+import com.psp.split_payment_api.domain.model.PaymentEventStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +14,8 @@ public interface PaymentEventRepository {
     Optional<PaymentEvent> findById(UUID paymentEventId);
 
     List<PaymentEvent> findByTransactionId(UUID transactionId);
+
+    List<PaymentEvent> findByStatus(PaymentEventStatus status);
 
     List<PaymentEvent> findAll();
 }
