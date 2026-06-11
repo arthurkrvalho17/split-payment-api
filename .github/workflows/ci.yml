@@ -1,0 +1,20 @@
+name: CI  #workflow
+
+on:   #Triggers: "on pipeline run"
+  push:
+    branches: ["**"]  #Define em quais branches serão executadas as triggers
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:  #Sequência de passos que o job vai seguir
+      - uses: actions/checkout@v3 #Clona o repository na VM
+      - name: Set up JDK 21       #Instala o Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      - name: Build and Test
+        run: mvn clean verify
