@@ -2,7 +2,6 @@ import com.psp.split_payment_api.application.service.TransactionService;
 import com.psp.split_payment_api.domain.model.*;
 import com.psp.split_payment_api.domain.repository.*;
 import com.psp.split_payment_api.infra.dto.CreateTransactionRequest;
-import com.psp.split_payment_api.infra.messaging.PaymentEventProducer;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,13 +35,12 @@ public class TransactionServiceTest {
     @Mock
     private PaymentEventRepository paymentEventRepository;
     @Mock
-    private PaymentEventProducer paymentEventProducer;
-    @Mock
     private EntityManager entityManager;
 
     @InjectMocks
     private TransactionService transactionService;
 
+    @BeforeEach
     void setUp() throws Exception {
         var field = TransactionService.class.getDeclaredField("entityManager");
         field.setAccessible(true);
